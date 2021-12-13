@@ -1,6 +1,33 @@
 /* Author: Dhrumil Amish Shah (B00857606) */
 require('dotenv').config();
+const fs = require('fs');
+const AWS = require('aws-sdk');
 const { PubSub, v1 } = require("@google-cloud/pubsub");
+
+const AWS_CONFIG = {
+    "region": process.env.AWS_REGION,
+    "accessKeyId": process.env.AWS_ACCESS_KEY,
+    "secretAccessKey": process.env.AWS_SECRET_KEY,
+    "sessionToken": process.env.AWS_SESSION_TOKEN,
+};
+
+AWS.config.update(AWS_CONFIG);
+
+const docClient = new AWS.DynamoDB.DocumentClient({
+    "region": process.env.AWS_REGION,
+    "accessKeyId": process.env.AWS_ACCESS_KEY,
+    "secretAccessKey": process.env.AWS_SECRET_KEY,
+    "sessionToken": process.env.AWS_SESSION_TOKEN,
+    "endpoint": process.env.AWS_DYNAMODB_ENDPOINT
+});
+
+const s3 = new AWS.S3({
+    "region": process.env.AWS_REGION,
+    "accessKeyId": process.env.AWS_ACCESS_KEY,
+    "secretAccessKey": process.env.AWS_SECRET_KEY,
+    "sessionToken": process.env.AWS_SESSION_TOKEN,
+    "endpoint": process.env.AWS_S3_ENDPOINT
+});
 
 const pubSubClient = new PubSub({
     keyFilename: 'csci5410-group5-safedeposit.json'
@@ -97,8 +124,45 @@ const pullDelivery = async (topicName, userId) => {
     }
 };
 
+const uploadImage = async (imageFile, userId) => {
+    try {
+        const fileNameSplit = imageFile.filename.split(".");
+        const fileExtension = fileNameSplit[fileNameSplit.length - 1];
+        const fileContent = fs.readFileSync(imageFile.path);
+        const s3Params = { Bucket: process.env.AWS_S3_IMAGES_BUCKET, Key: `${Date.now().toString()}.${fileExtension}`, Body: fileContent };
+        const s3Data = await s3.upload(s3Params).promise();
+        const imageUploadParams = {
+            TableName: "user",
+            Key: {
+                userId: userId
+            },
+            UpdateExpression: "set imageLocation = :iL",
+            ExpressionAttributeValues: {
+                ":iL": s3Data.Location.toString()
+            },
+            ReturnValues: "UPDATED_NEW"
+        };
+        console.log(imageUploadParams);
+        await docClient.update(imageUploadParams).promise();
+        return {
+            message: "Image Uploaded Successfully",
+            success: true,
+            payload: s3Data.Location.toString(),
+            statusCode: 200,
+        };
+    } catch (error) {
+        return {
+            message: "Internal Server Error",
+            success: false,
+            payload: undefined,
+            statusCode: 500,
+        };
+    }
+}
+
 module.exports = {
     createTopic,
     publishMessage,
-    pullDelivery
+    pullDelivery,
+    uploadImage
 };
